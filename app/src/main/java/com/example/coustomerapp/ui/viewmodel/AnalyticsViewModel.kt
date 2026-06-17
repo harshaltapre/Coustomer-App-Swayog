@@ -42,7 +42,14 @@ class AnalyticsViewModel @Inject constructor(
         Pair(profile, period)
     }.flatMapLatest { (profile, period) ->
         if (profile != null) {
-            repository.getInverterHistory(profile.id, period)
+            val dbPeriod = if (period == "weekly" || period == "monthly") "daily" else period
+            repository.getInverterHistory(profile.id, dbPeriod).map { list ->
+                if (period == "weekly") {
+                    list.takeLast(7)
+                } else {
+                    list
+                }
+            }
         } else {
             flowOf(emptyList())
         }
@@ -78,7 +85,8 @@ class AnalyticsViewModel @Inject constructor(
                 repository.refreshProfile()
                 repository.getCustomerProfileDirect()?.let { profile ->
                     repository.refreshInverterTelemetry(profile.id)
-                    repository.refreshInverterHistory(profile.id, _selectedPeriod.value)
+                    val apiPeriod = if (_selectedPeriod.value == "weekly" || _selectedPeriod.value == "monthly") "daily" else _selectedPeriod.value
+                    repository.refreshInverterHistory(profile.id, apiPeriod)
                 }
             } finally {
                 _isLoading.value = false

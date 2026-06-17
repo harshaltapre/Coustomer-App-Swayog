@@ -11,6 +11,6 @@ data class InverterGenerationSummaryEntity(
     val peakPower: Double,
     val currentPower: Double,
     val isSimulated: Boolean,
-    val status: String?, // 'online', 'offline'
-    val lastUpdated: String?
+    val status: String,
+    val lastUpdated: String
 )

@@ -1,10 +1,15 @@
 package com.example.coustomerapp.data.repository
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.util.Log
+import java.io.ByteArrayOutputStream
 import androidx.work.*
 import com.example.coustomerapp.data.local.dao.*
 import com.example.coustomerapp.data.local.entities.*
 import com.example.coustomerapp.data.remote.ApiService
+import com.example.coustomerapp.data.remote.dto.*
 import com.example.coustomerapp.data.sync.ServiceRequestSyncWorker
 import com.example.coustomerapp.util.SessionManager
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -30,23 +35,24 @@ class CustomerRepository @Inject constructor(
     private val invoiceDao: InvoiceDao,
     private val savedCardDao: SavedCardDao,
     private val amcVisitDao: AmcVisitDao,
+    private val inverterDao: InverterDao,
     private val sessionManager: SessionManager
 ) {
     val customerProfile: Flow<CustomerProfileEntity?> = customerProfileDao.getCustomerProfile()
     val dispatches: Flow<List<DispatchRecordEntity>> = dispatchRecordDao.getAllDispatches()
     fun searchDispatches(query: String): Flow<List<DispatchRecordEntity>> = dispatchRecordDao.searchDispatches(query)
 
-    val serviceRequests: Flow<List<ServiceRequestEntity>> = serviceRequestDao.getAllServiceRequests()
+    val serviceRequests: Flow<List<ServiceRequestEntity>> = serviceRequestDao.getAllRequests()
     val amcVisits: Flow<List<AmcVisit>> = amcVisitDao.getAllAmcVisits()
     val savedCards: Flow<List<SavedCardEntity>> = savedCardDao.getSavedCards()
 
     fun getInvoices(customerId: Int): Flow<List<InvoiceEntity>> = invoiceDao.getAllInvoices(customerId)
 
     fun getInverterSummary(customerId: Int): Flow<InverterGenerationSummaryEntity?> =
-        inverterGenerationSummaryDao.getSummary(customerId)
+        inverterDao.getSummary(customerId)
 
     fun getInverterHistory(customerId: Int, period: String): Flow<List<InverterGenerationHistoryEntity>> =
-        inverterGenerationHistoryDao.getHistory(customerId, period)
+        inverterDao.getHistory(customerId, period)
 
     suspend fun refreshProfile() {
         try {
@@ -152,18 +158,16 @@ class CustomerRepository @Inject constructor(
                 response.body()?.data?.requests?.let { dtos ->
                     val requests = dtos.map { dto ->
                         ServiceRequestEntity(
-                            id = dto.id,
-                            customerId = customerId,
-                            title = dto.serviceType,
+                            serverId = dto.id,
+                            serviceType = dto.serviceType,
                             description = dto.description,
+                            address = dto.address ?: "",
+                            latitude = dto.latitude ?: 0.0,
+                            longitude = dto.longitude ?: 0.0,
+                            preferredDate = dto.scheduledDate ?: "",
                             status = dto.status,
-                            address = dto.address,
-                            latitude = dto.latitude,
-                            longitude = dto.longitude,
-                            scheduledDate = dto.scheduledDate,
-                            scheduledTime = dto.scheduledTime,
-                            createdAt = dto.createdAt,
-                            isSynced = true
+                            isSynced = true,
+                            createdAt = dto.createdAt
                         )
                     }
                     serviceRequestDao.insertAll(requests)
@@ -200,50 +204,126 @@ class CustomerRepository @Inject constructor(
         }
     }
 
+    // ─── Inverter: Summary ───
     suspend fun refreshInverterTelemetry(customerId: Int) {
         try {
-            val response = apiService.getInverterTelemetry(customerId)
+            val response = apiService.getInverterGenerationSummary(customerId)
             if (response.isSuccessful) {
-                response.body()?.let { dto ->
-                    val summary = InverterGenerationSummaryEntity(
-                        customerId = customerId,
-                        dailyGeneration = dto.dailyGeneration,
-                        totalGeneration = dto.totalGeneration,
-                        peakPower = dto.peakPower,
-                        currentPower = dto.currentPower,
-                        isSimulated = dto.isSimulated,
-                        status = dto.status,
-                        lastUpdated = dto.lastUpdated
+                response.body()?.let { body ->
+                    inverterDao.insertSummary(
+                        InverterGenerationSummaryEntity(
+                            customerId    = customerId,
+                            dailyGeneration = body.dailyGeneration,
+                            totalGeneration = body.totalGeneration,
+                            peakPower     = body.peakPower,
+                            currentPower  = body.currentPower,
+                            isSimulated   = body.isSimulated,
+                            status        = body.status,
+                            lastUpdated   = body.lastUpdated
+                        )
                     )
-                    inverterGenerationSummaryDao.insertSummary(summary)
                 }
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e("CustomerRepository", "refreshInverterTelemetry error: ${e.message}")
         }
     }
 
+    // ─── Inverter: History ───
     suspend fun refreshInverterHistory(customerId: Int, period: String) {
         try {
-            val response = apiService.getInverterHistory(customerId, period)
+            val response = apiService.getInverterGenerationHistory(customerId, period)
             if (response.isSuccessful) {
-                response.body()?.let { dto ->
-                    val points = dto.history.map { point ->
+                response.body()?.let { body ->
+                    inverterDao.clearHistory(customerId, period)
+                    val entities = body.history.map { point ->
                         InverterGenerationHistoryEntity(
-                            customerId = customerId,
-                            period = period,
-                            label = point.label,
-                            powerValue = point.power,
+                            customerId      = customerId,
+                            period          = period,
+                            label           = point.label,
+                            powerValue      = point.power,
                             generationValue = point.generation
                         )
                     }
-                    inverterGenerationHistoryDao.clearHistory(customerId, period)
-                    inverterGenerationHistoryDao.insertAll(points)
+                    inverterDao.insertHistory(entities)
                 }
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e("CustomerRepository", "refreshInverterHistory error: ${e.message}")
         }
+    }
+
+    // ─── Weather ───
+    suspend fun fetchWeatherForCity(cityName: String): CurrentWeather? {
+        return try {
+            val geoResponse = apiService.getCoordinatesByCity(cityName)
+            if (geoResponse.isSuccessful) {
+                val result = geoResponse.body()?.results?.firstOrNull()
+                if (result != null) {
+                    val weatherRes = apiService.getWeather(result.latitude, result.longitude)
+                    if (weatherRes.isSuccessful) return weatherRes.body()?.current
+                }
+            }
+            null
+        } catch (e: Exception) {
+            Log.e("CustomerRepository", "fetchWeather error: ${e.message}")
+            null
+        }
+    }
+
+    // ─── Service Requests ───
+    suspend fun saveServiceRequestLocally(entity: ServiceRequestEntity): Long =
+        serviceRequestDao.insert(entity)
+
+    fun getAllServiceRequests(): Flow<List<ServiceRequestEntity>> =
+        serviceRequestDao.getAllRequests()
+
+    suspend fun getUnsyncedRequests(): List<ServiceRequestEntity> =
+        serviceRequestDao.getUnsyncedRequests()
+
+    suspend fun markRequestSynced(localId: Int, serverId: Int) =
+        serviceRequestDao.markSynced(localId, serverId)
+
+    suspend fun uploadServiceRequest(entity: ServiceRequestEntity, imageFile: File?): Boolean {
+        return try {
+            val imagePart = imageFile?.let {
+                val compressed = compressImageBelow500KB(it)
+                val requestFile = compressed.asRequestBody("image/jpeg".toMediaTypeOrNull())
+                MultipartBody.Part.createFormData("images", compressed.name, requestFile)
+            }
+            val response = apiService.createServiceRequestNew(
+                serviceType  = entity.serviceType.toRequestBody("text/plain".toMediaTypeOrNull()),
+                description  = entity.description.toRequestBody("text/plain".toMediaTypeOrNull()),
+                address      = entity.address.toRequestBody("text/plain".toMediaTypeOrNull()),
+                latitude     = entity.latitude.toString().toRequestBody("text/plain".toMediaTypeOrNull()),
+                longitude    = entity.longitude.toString().toRequestBody("text/plain".toMediaTypeOrNull()),
+                preferredDate = entity.preferredDate.toRequestBody("text/plain".toMediaTypeOrNull()),
+                image        = imagePart
+            )
+            if (response.isSuccessful) {
+                response.body()?.data?.id?.let { serverId ->
+                    serviceRequestDao.markSynced(entity.localId, serverId)
+                }
+                true
+            } else false
+        } catch (e: Exception) {
+            Log.e("CustomerRepository", "uploadServiceRequest error: ${e.message}")
+            false
+        }
+    }
+
+    // ─── Image compression helper ───
+    private fun compressImageBelow500KB(file: File): File {
+        val bitmap = BitmapFactory.decodeFile(file.absolutePath) ?: return file
+        val outputFile = File(file.parent, "compressed_${file.name}")
+        var quality = 90
+        do {
+            val stream = ByteArrayOutputStream()
+            bitmap.compress(Bitmap.CompressFormat.JPEG, quality, stream)
+            outputFile.writeBytes(stream.toByteArray())
+            quality -= 10
+        } while (outputFile.length() > 500_000 && quality > 10)
+        return outputFile
     }
 
     suspend fun refreshInvoices(customerId: Int) {
@@ -272,49 +352,6 @@ class CustomerRepository @Inject constructor(
         } catch (e: Exception) {
             e.printStackTrace()
         }
-    }
-
-    suspend fun submitServiceRequest(
-        title: String,
-        description: String,
-        address: String,
-        latitude: Double,
-        longitude: Double,
-        localImage: File?
-    ) {
-        val customerProfileDirect = customerProfileDao.getCustomerProfileDirect()
-        val customerId = customerProfileDirect?.id ?: 0
-
-        // 1. Create a local ServiceRequestEntity in the database
-        val localRequest = ServiceRequestEntity(
-            id = null,
-            customerId = customerId,
-            title = title,
-            description = description,
-            address = address,
-            latitude = latitude,
-            longitude = longitude,
-            status = "pending",
-            scheduledDate = null,
-            scheduledTime = null,
-            createdAt = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US).apply {
-                timeZone = java.util.TimeZone.getTimeZone("UTC")
-            }.format(java.util.Date()),
-            isSynced = false,
-            localImagePath = localImage?.absolutePath
-        )
-        serviceRequestDao.insertServiceRequest(localRequest)
-
-        // 2. Enqueue WorkManager sync task with Network constraint
-        val syncConstraints = Constraints.Builder()
-            .setRequiredNetworkType(NetworkType.CONNECTED)
-            .build()
-
-        val serviceSyncWorker = OneTimeWorkRequestBuilder<ServiceRequestSyncWorker>()
-            .setConstraints(syncConstraints)
-            .build()
-
-        WorkManager.getInstance(context).enqueue(serviceSyncWorker)
     }
 
     suspend fun saveCard(card: SavedCardEntity) {

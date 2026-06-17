@@ -103,6 +103,9 @@ dependencies {
     
     // Razorpay
     implementation(libs.razorpay)
+    
+    // Play Services Location
+    implementation(libs.play.services.location)
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

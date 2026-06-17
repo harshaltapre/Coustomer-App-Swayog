@@ -1,5 +1,7 @@
 package com.example.coustomerapp.ui.screens.dashboard
 
+import com.example.coustomerapp.data.remote.dto.CurrentWeather
+import com.example.coustomerapp.data.remote.dto.translateWeatherCode
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -54,10 +56,13 @@ fun DashboardScreen(
     val pullToRefreshState = rememberPullToRefreshState()
 
     // Weather state
-    val weatherTemp by viewModel.weatherTemp.collectAsState()
-    val weatherWind by viewModel.weatherWind.collectAsState()
-    val weatherCondition by viewModel.weatherCondition.collectAsState()
-    val weatherIcon by viewModel.weatherIcon.collectAsState()
+    val weather by viewModel.weatherState.collectAsState()
+
+    LaunchedEffect(profile?.city) {
+        profile?.city?.let { city ->
+            if (city.isNotBlank()) viewModel.loadWeather(city)
+        }
+    }
 
     PullToRefreshBox(
         isRefreshing = isRefreshing,
@@ -111,13 +116,10 @@ fun DashboardScreen(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Weather Analytics Card (replaces Carbon Offset Visualizer)
-                WeatherAnalyticsCard(
-                    temp = weatherTemp,
-                    wind = weatherWind,
-                    condition = weatherCondition,
-                    icon = weatherIcon
-                )
+                // Weather Widget Card (replaces Weather Analytics Card)
+                weather?.let { w ->
+                    WeatherWidgetCard(weather = w, city = profile?.city ?: "Solar Site")
+                }
 
                 Spacer(modifier = Modifier.height(16.dp))
 
@@ -172,110 +174,62 @@ fun DashboardScreen(
 }
 
 @Composable
-fun WeatherAnalyticsCard(
-    temp: String,
-    wind: String,
-    condition: String,
-    icon: String
-) {
-    GlassCard {
-        Column(modifier = Modifier.padding(20.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(32.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(InfoAccent.copy(alpha = 0.12f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        Icons.Default.Cloud,
-                        contentDescription = null,
-                        tint = InfoAccent,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-                Spacer(modifier = Modifier.width(10.dp))
-                Text(
-                    "Weather Analytics",
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White,
-                    style = MaterialTheme.typography.titleSmall
-                )
-            }
-            Spacer(modifier = Modifier.height(16.dp))
+fun WeatherWidgetCard(weather: CurrentWeather, city: String) {
+    val (conditionText, _) = translateWeatherCode(weather.weatherCode)
+    val weatherIcon = when (weather.weatherCode) {
+        0 -> Icons.Default.WbSunny
+        1, 2, 3 -> Icons.Default.Cloud
+        45, 48 -> Icons.Default.BlurOn
+        51, 53, 55, 61, 63, 65, 80, 81, 82 -> Icons.Default.Grain
+        71, 73, 75 -> Icons.Default.AcUnit
+        95, 96, 99 -> Icons.Default.Thunderstorm
+        else -> Icons.Default.Cloud
+    }
 
+    DashboardInfoCard(
+        title      = "Local solar weather",
+        icon       = Icons.Default.WbSunny,
+        accentColor = InfoAccent,
+        content    = {
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceAround,
-                verticalAlignment = Alignment.CenterVertically
+                modifier              = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment     = Alignment.CenterVertically
             ) {
-                // Temperature
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Box(
-                        modifier = Modifier
-                            .size(54.dp)
-                            .clip(CircleShape)
-                            .background(PrimarySolar.copy(alpha = 0.1f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(icon, fontSize = 24.sp)
-                    }
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = temp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White,
-                        fontSize = 16.sp
-                    )
-                    Text("Temperature", fontSize = 10.sp, color = TextSecondary)
+                Column {
+                    Text(city, fontWeight = FontWeight.Bold, color = Color.White, fontSize = 16.sp)
+                    Text("Condition: $conditionText", color = TextSecondary, fontSize = 13.sp,
+                        modifier = Modifier.padding(top = 4.dp))
                 }
-
-                // Wind Speed
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Box(
-                        modifier = Modifier
-                            .size(54.dp)
-                            .clip(CircleShape)
-                            .background(EcoAccent.copy(alpha = 0.1f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text("💨", fontSize = 24.sp)
+                Row(verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            imageVector = weatherIcon,
+                            contentDescription = conditionText,
+                            tint = if (weather.weatherCode == 0) PrimarySolar else InfoAccent,
+                            modifier = Modifier.size(32.dp)
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text("${weather.temperature}°C", fontWeight = FontWeight.Black,
+                            color = Color.White, fontSize = 18.sp)
                     }
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = wind,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White,
-                        fontSize = 16.sp
-                    )
-                    Text("Wind Speed", fontSize = 10.sp, color = TextSecondary)
-                }
-
-                // Condition
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Box(
-                        modifier = Modifier
-                            .size(54.dp)
-                            .clip(CircleShape)
-                            .background(InfoAccent.copy(alpha = 0.1f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text("🌡️", fontSize = 24.sp)
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            imageVector = Icons.Default.Air,
+                            contentDescription = "Wind speed",
+                            tint = InfoAccent,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text("${weather.windSpeed} km/h", fontWeight = FontWeight.Bold,
+                            color = Color.White, fontSize = 13.sp)
+                        Text("Wind speed", color = TextSecondary, fontSize = 10.sp)
                     }
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = condition,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White,
-                        fontSize = 13.sp,
-                        maxLines = 1
-                    )
-                    Text("Condition", fontSize = 10.sp, color = TextSecondary)
                 }
             }
         }
-    }
+    )
 }
 
 @Composable
@@ -341,11 +295,20 @@ fun GreetingHeader(name: String, onLogout: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column {
-            Text(
-                text = "$greeting ☀️",
-                style = MaterialTheme.typography.bodyMedium,
-                color = TextSecondary
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = greeting,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = TextSecondary
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Icon(
+                    imageVector = Icons.Default.WbSunny,
+                    contentDescription = null,
+                    tint = PrimarySolar,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
             Text(
                 text = name.split(" ").firstOrNull() ?: "User",
                 style = MaterialTheme.typography.headlineMedium,
@@ -622,7 +585,11 @@ fun EnergyVisualizationCard(
                         fontWeight = FontWeight.Bold,
                         color = Color.White
                     )
-                    Text("kW", fontSize = 14.sp, color = TextSecondary)
+                    Text(
+                        text = "of ${inverterSummary?.peakPower ?: "--"} kW Capacity",
+                        fontSize = 12.sp,
+                        color = TextSecondary
+                    )
                 }
             }
             Spacer(modifier = Modifier.height(16.dp))

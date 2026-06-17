@@ -8,6 +8,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Inventory
 import androidx.compose.material.icons.filled.LocalShipping
 import androidx.compose.material.icons.filled.Search
@@ -306,11 +307,23 @@ fun DispatchItem(record: DispatchRecordEntity) {
                         .border(1.dp, GlassBorder, RoundedCornerShape(8.dp))
                         .padding(10.dp)
                 ) {
-                    Text(
-                        text = "📝 ${record.notes}",
-                        fontSize = 12.sp,
-                        color = TextSecondary
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Description,
+                            contentDescription = "Notes",
+                            tint = TextSecondary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = record.notes,
+                            fontSize = 12.sp,
+                            color = TextSecondary
+                        )
+                    }
                 }
             }
         }

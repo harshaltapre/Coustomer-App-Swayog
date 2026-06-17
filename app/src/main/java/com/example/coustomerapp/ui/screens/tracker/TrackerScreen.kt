@@ -10,6 +10,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Leaderboard
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Sync
@@ -24,10 +25,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
@@ -37,6 +35,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.coustomerapp.ui.screens.dashboard.GlassCard
 import com.example.coustomerapp.ui.theme.*
 import com.example.coustomerapp.ui.viewmodel.TrackerViewModel
+import androidx.compose.ui.graphics.nativeCanvas
+import android.graphics.Paint
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -45,409 +45,283 @@ fun TrackerScreen(
     onNavigateBack: () -> Unit,
     viewModel: TrackerViewModel = hiltViewModel()
 ) {
-    val selectedPeriod by viewModel.selectedPeriod.collectAsState()
-    val historyPoints by viewModel.historyPoints.collectAsState()
-    val summary by viewModel.inverterSummary.collectAsState()
-    val isLoading by viewModel.isLoading.collectAsState()
-    val isRefreshing by viewModel.isRefreshing.collectAsState()
-    val pullToRefreshState = rememberPullToRefreshState()
+    val selectedPeriod  by viewModel.selectedPeriod.collectAsState()
+    val historyPoints   by viewModel.historyPoints.collectAsState()
+    val summary         by viewModel.inverterSummary.collectAsState()
+    val isLoading       by viewModel.isLoading.collectAsState()
+    val isRefreshing    by viewModel.isRefreshing.collectAsState()
+    val pullState       = rememberPullToRefreshState()
 
-    var touchX by remember { mutableStateOf<Float?>(null) }
-    var activeIndex by remember { mutableStateOf<Int?>(null) }
+    var touchX          by remember { mutableStateOf<Float?>(null) }
+    var activeIndex     by remember { mutableStateOf<Int?>(null) }
 
-    LaunchedEffect(selectedPeriod) {
-        touchX = null
-        activeIndex = null
-    }
+    LaunchedEffect(selectedPeriod) { touchX = null; activeIndex = null }
 
-    PullToRefreshBox(
-        isRefreshing = isRefreshing,
-        onRefresh = { viewModel.refreshData() },
-        state = pullToRefreshState,
-        modifier = Modifier.fillMaxSize()
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp)
-        ) {
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Header
-            Text(
-                "Energy Analytics",
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold,
-                color = Color.White
-            )
-            Text(
-                "Monitor your solar generation in real-time",
-                style = MaterialTheme.typography.bodyMedium,
-                color = TextSecondary,
-                modifier = Modifier.padding(top = 4.dp)
-            )
-
-            Spacer(modifier = Modifier.height(20.dp))
-
-            // Period Selection Tabs
-            val periods = listOf(
-                "realtime" to "Real-time",
-                "daily" to "Daily",
-                "monthly" to "Monthly",
-                "yearly" to "Yearly"
-            )
-            TabRow(
-                selectedTabIndex = periods.indexOfFirst { it.first == selectedPeriod }.coerceAtLeast(0),
-                containerColor = SurfaceDark,
-                contentColor = PrimarySolar,
-                indicator = { tabPositions ->
-                    if (tabPositions.isNotEmpty()) {
-                        TabRowDefaults.SecondaryIndicator(
-                            Modifier.tabIndicatorOffset(tabPositions[periods.indexOfFirst { it.first == selectedPeriod }.coerceAtLeast(0)]),
-                            color = PrimarySolar
-                        )
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text("Generation Telemetry", fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleLarge, color = Color.White)
+                },
+                navigationIcon = {
+                    IconButton(onClick = onNavigateBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
                     }
                 },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent, titleContentColor = Color.White)
+            )
+        },
+        containerColor = Color.Transparent
+    ) { padding ->
+        PullToRefreshBox(
+            isRefreshing = isRefreshing,
+            onRefresh    = { viewModel.refreshTracker() },
+            state        = pullState,
+            modifier     = Modifier.fillMaxSize().padding(padding)
+        ) {
+            Column(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
+                    .fillMaxSize()
+                    .padding(horizontal = 16.dp)
+                    .verticalScroll(rememberScrollState())
             ) {
-                periods.forEach { (key, label) ->
-                    Tab(
-                        selected = selectedPeriod == key,
-                        onClick = { viewModel.setPeriod(key) },
-                        text = {
-                            Text(
-                                label,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold
+                Spacer(Modifier.height(8.dp))
+
+                // ── Period selector tabs ──
+                val periods = listOf("realtime" to "Real-time", "weekly" to "Weekly",
+                    "monthly" to "Monthly", "yearly" to "Yearly")
+                val selectedIdx = periods.indexOfFirst { it.first == selectedPeriod }.coerceAtLeast(0)
+
+                TabRow(
+                    selectedTabIndex = selectedIdx,
+                    containerColor   = SurfaceDark,
+                    contentColor     = PrimarySolar,
+                    indicator        = { tabPositions ->
+                        if (tabPositions.isNotEmpty()) {
+                            TabRowDefaults.SecondaryIndicator(
+                                Modifier.tabIndicatorOffset(tabPositions[selectedIdx]),
+                                color = PrimarySolar
                             )
-                        },
-                        selectedContentColor = PrimarySolar,
-                        unselectedContentColor = TextSecondary
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(20.dp))
-
-            // Tooltip indicator card if active
-            if (activeIndex != null && activeIndex!! < historyPoints.size) {
-                val point = historyPoints[activeIndex!!]
-                val valueStr = if (selectedPeriod == "realtime") {
-                    "${point.powerValue ?: 0.0} kW"
-                } else {
-                    "${point.generationValue ?: 0.0} kWh"
-                }
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(PrimarySolar.copy(alpha = 0.15f))
-                        .border(1.dp, PrimarySolar.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
-                        .padding(12.dp),
-                    contentAlignment = Alignment.Center
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
                 ) {
-                    Text(
-                        text = "${point.label}  •  $valueStr",
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 14.sp
-                    )
+                    periods.forEach { (key, label) ->
+                        Tab(
+                            selected             = selectedPeriod == key,
+                            onClick              = { viewModel.setPeriod(key) },
+                            text                 = { Text(label, fontSize = 13.sp, fontWeight = FontWeight.SemiBold) },
+                            selectedContentColor   = PrimarySolar,
+                            unselectedContentColor = TextSecondary
+                        )
+                    }
                 }
-                Spacer(modifier = Modifier.height(12.dp))
-            }
 
-            // Chart Canvas Panel
-            GlassCard(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(300.dp)
-            ) {
-                if (historyPoints.isEmpty()) {
+                Spacer(Modifier.height(16.dp))
+
+                // ── Tooltip info box ──
+                if (activeIndex != null && activeIndex!! < historyPoints.size) {
+                    val point    = historyPoints[activeIndex!!]
+                    val valueStr = if (selectedPeriod == "realtime")
+                        "${point.powerValue ?: 0.0} kW" else "${point.generationValue ?: 0.0} kWh"
                     Box(
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier.fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(PrimarySolar.copy(alpha = 0.15f))
+                            .border(1.dp, PrimarySolar.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+                            .padding(12.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        if (isLoading) {
-                            CircularProgressIndicator(color = PrimarySolar)
-                        } else {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Icon(
-                                    Icons.Default.Leaderboard,
-                                    contentDescription = null,
-                                    tint = TextTertiary,
-                                    modifier = Modifier.size(48.dp)
-                                )
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Text("No telemetry data for this period", color = TextSecondary)
-                            }
-                        }
+                        Text("Timeframe: ${point.label}  •  Yield: $valueStr",
+                            color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                     }
                 } else {
-                    Box(modifier = Modifier.fillMaxSize()) {
-                        Canvas(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(16.dp)
-                                .pointerInput(historyPoints) {
-                                    detectTapGestures(
-                                        onPress = { offset ->
-                                            touchX = offset.x
-                                        }
-                                    )
-                                }
-                                .pointerInput(historyPoints) {
-                                    detectDragGestures(
-                                        onDragEnd = {
-                                            touchX = null
-                                            activeIndex = null
-                                        },
-                                        onDragCancel = {
-                                            touchX = null
-                                            activeIndex = null
-                                        },
-                                        onDrag = { change, _ ->
-                                            touchX = change.position.x
-                                        }
-                                    )
-                                }
-                        ) {
-                            val width = size.width
-                            val height = size.height
-                            val padding = 36.dp.toPx()
-                            val graphWidth = width - padding * 2
-                            val graphHeight = height - padding * 2
+                    Box(Modifier.fillMaxWidth().padding(vertical = 4.dp), contentAlignment = Alignment.Center) {
+                        Text("Drag finger across graph to inspect values", color = TextSecondary, fontSize = 12.sp)
+                    }
+                }
 
-                            val maxVal = historyPoints.maxOfOrNull {
-                                if (selectedPeriod == "realtime") it.powerValue ?: 1.0
-                                else it.generationValue ?: 1.0
-                            }?.coerceAtLeast(1.0) ?: 1.0
+                Spacer(Modifier.height(12.dp))
 
-                            val stepX = if (historyPoints.size > 1) graphWidth / (historyPoints.size - 1) else graphWidth
-
-                            // Resolve active touch index
-                            touchX?.let { tx ->
-                                val relativeX = tx - padding
-                                val index = (relativeX / stepX).roundToInt().coerceIn(0, historyPoints.size - 1)
-                                activeIndex = index
-                            }
-
-                            // Draw horizontal grid lines
-                            for (i in 0..4) {
-                                val y = height - padding - (i / 4f) * graphHeight
-                                drawLine(
-                                    color = GlassBorder,
-                                    start = Offset(padding, y),
-                                    end = Offset(width - padding, y),
-                                    strokeWidth = 1f
-                                )
-                            }
-
-                            // Draw X axis
-                            drawLine(
-                                color = GlassBorder,
-                                start = Offset(padding, height - padding),
-                                end = Offset(width - padding, height - padding),
-                                strokeWidth = 2f
-                            )
-
-                            if (selectedPeriod == "realtime") {
-                                // Spline line chart with gradient fill
-                                val path = Path()
-                                val fillPath = Path()
-
-                                historyPoints.forEachIndexed { idx, pt ->
-                                    val valY = pt.powerValue ?: 0.0
-                                    val ptX = padding + idx * stepX
-                                    val ptY = height - padding - (valY / maxVal).toFloat() * graphHeight
-
-                                    if (idx == 0) {
-                                        path.moveTo(ptX, ptY)
-                                        fillPath.moveTo(ptX, height - padding)
-                                        fillPath.lineTo(ptX, ptY)
-                                    } else {
-                                        val prevPtX = padding + (idx - 1) * stepX
-                                        val prevPtY = height - padding - ((historyPoints[idx - 1].powerValue ?: 0.0) / maxVal).toFloat() * graphHeight
-                                        val ctrlX1 = (prevPtX + ptX) / 2f
-                                        val ctrlY1 = prevPtY
-                                        val ctrlX2 = (prevPtX + ptX) / 2f
-                                        val ctrlY2 = ptY
-
-                                        path.cubicTo(ctrlX1, ctrlY1, ctrlX2, ctrlY2, ptX, ptY)
-                                        fillPath.cubicTo(ctrlX1, ctrlY1, ctrlX2, ctrlY2, ptX, ptY)
+                // ── Chart Canvas ──
+                GlassCard(modifier = Modifier.fillMaxWidth().height(280.dp)) {
+                    if (historyPoints.isEmpty()) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            if (isLoading) CircularProgressIndicator(color = PrimarySolar)
+                            else Text("No telemetry data available", color = TextSecondary)
+                        }
+                    } else {
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            Canvas(
+                                modifier = Modifier.fillMaxSize().padding(16.dp)
+                                    .pointerInput(historyPoints) {
+                                        detectTapGestures(onPress = { offset -> touchX = offset.x })
                                     }
-
-                                    if (idx == historyPoints.size - 1) {
-                                        fillPath.lineTo(ptX, height - padding)
-                                        fillPath.close()
+                                    .pointerInput(historyPoints) {
+                                        detectDragGestures(
+                                            onDragEnd    = { touchX = null; activeIndex = null },
+                                            onDragCancel = { touchX = null; activeIndex = null },
+                                            onDrag       = { change, _ -> touchX = change.position.x }
+                                        )
                                     }
+                            ) {
+                                val w           = size.width
+                                val h           = size.height
+                                val padLeft     = 42.dp.toPx()
+                                val padRight    = 16.dp.toPx()
+                                val padTop      = 20.dp.toPx()
+                                val padBottom   = 36.dp.toPx()
+                                val graphW      = w - padLeft - padRight
+                                val graphH      = h - padTop - padBottom
+                                val maxVal      = historyPoints.maxOfOrNull {
+                                    if (selectedPeriod == "realtime") it.powerValue ?: 1.0 else it.generationValue ?: 1.0
+                                }?.coerceAtLeast(1.0) ?: 1.0
+                                val stepX       = if (historyPoints.size > 1) graphW / (historyPoints.size - 1) else graphW
+
+                                touchX?.let { tx ->
+                                    activeIndex = ((tx - padLeft) / stepX).roundToInt().coerceIn(0, historyPoints.size - 1)
                                 }
 
-                                // Area gradient fill
-                                drawPath(
-                                    path = fillPath,
-                                    brush = Brush.verticalGradient(
-                                        colors = listOf(EcoAccent.copy(alpha = 0.35f), Color.Transparent)
+                                // ── Draw Horizontal Grid Lines and Y-Axis Labels ──
+                                val gridLines = 4
+                                val textPaint = Paint().apply {
+                                    color = android.graphics.Color.parseColor("#94A3B8") // TextSecondary
+                                    textSize = 9.dp.toPx()
+                                    textAlign = Paint.Align.RIGHT
+                                    isAntiAlias = true
+                                }
+                                for (i in 0..gridLines) {
+                                    val fraction = i.toFloat() / gridLines
+                                    val y = h - padBottom - fraction * graphH
+                                    // Grid line
+                                    drawLine(
+                                        color = if (i == 0) GlassBorder else Color.White.copy(alpha = 0.04f),
+                                        start = Offset(padLeft, y),
+                                        end = Offset(w - padRight, y),
+                                        strokeWidth = if (i == 0) 2f else 1f
                                     )
-                                )
-
-                                // Spline stroke
-                                drawPath(
-                                    path = path,
-                                    color = EcoAccent,
-                                    style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
-                                )
-                            } else {
-                                // Bar chart for daily/monthly/yearly
-                                val barWidth = (stepX * 0.5f).coerceIn(8.dp.toPx(), 40.dp.toPx())
-                                historyPoints.forEachIndexed { idx, pt ->
-                                    val valY = pt.generationValue ?: 0.0
-                                    val ptX = padding + idx * stepX - barWidth / 2f
-                                    val barHeight = (valY / maxVal).toFloat() * graphHeight
-                                    val ptY = height - padding - barHeight
-
-                                    val isActive = activeIndex == idx
-                                    val barColor = if (isActive) PrimarySolar else InfoAccent
-
-                                    drawRoundRect(
-                                        color = barColor,
-                                        topLeft = Offset(ptX, ptY),
-                                        size = Size(barWidth, barHeight.coerceAtLeast(2f)),
-                                        cornerRadius = CornerRadius(6.dp.toPx(), 6.dp.toPx())
+                                    // Y value label
+                                    val unit = if (selectedPeriod == "realtime") "kW" else "kWh"
+                                    val yVal = fraction * maxVal
+                                    val label = String.format("%.1f", yVal)
+                                    drawContext.canvas.nativeCanvas.drawText(
+                                        "$label $unit",
+                                        padLeft - 8.dp.toPx(),
+                                        y + 3.dp.toPx(),
+                                        textPaint
                                     )
                                 }
-                            }
 
-                            // X axis label dots
-                            historyPoints.forEachIndexed { idx, _ ->
-                                val ptX = padding + idx * stepX
-                                if (idx % (historyPoints.size / 5).coerceAtLeast(1) == 0 || idx == historyPoints.size - 1) {
-                                    drawCircle(
-                                        color = GlassBorder,
-                                        radius = 3f,
-                                        center = Offset(ptX, height - padding)
-                                    )
-                                }
-                            }
-
-                            // Tooltip crosshair
-                            activeIndex?.let { idx ->
-                                val ptX = padding + idx * stepX
-                                drawLine(
-                                    color = Color.White.copy(alpha = 0.6f),
-                                    start = Offset(ptX, padding),
-                                    end = Offset(ptX, height - padding),
-                                    strokeWidth = 1.dp.toPx(),
-                                    cap = StrokeCap.Round
-                                )
-                                val valY = if (selectedPeriod == "realtime") {
-                                    historyPoints[idx].powerValue ?: 0.0
+                                // ── Draw Graph Data ──
+                                if (selectedPeriod == "realtime") {
+                                    // ── Spline area chart ──
+                                    val path     = Path()
+                                    val fillPath = Path()
+                                    historyPoints.forEachIndexed { idx, pt ->
+                                        val valY = pt.powerValue ?: 0.0
+                                        val ptX  = padLeft + idx * stepX
+                                        val ptY  = h - padBottom - (valY / maxVal).toFloat() * graphH
+                                        if (idx == 0) {
+                                            path.moveTo(ptX, ptY)
+                                            fillPath.moveTo(ptX, h - padBottom)
+                                            fillPath.lineTo(ptX, ptY)
+                                        } else {
+                                            val prevX  = padLeft + (idx - 1) * stepX
+                                            val prevY  = h - padBottom - ((historyPoints[idx - 1].powerValue ?: 0.0) / maxVal).toFloat() * graphH
+                                            val ctrlX1 = (prevX + ptX) / 2f
+                                            path.cubicTo(ctrlX1, prevY, ctrlX1, ptY, ptX, ptY)
+                                            fillPath.cubicTo(ctrlX1, prevY, ctrlX1, ptY, ptX, ptY)
+                                        }
+                                        if (idx == historyPoints.size - 1) { 
+                                            fillPath.lineTo(ptX, h - padBottom)
+                                            fillPath.close() 
+                                        }
+                                    }
+                                    drawPath(fillPath, Brush.verticalGradient(listOf(EcoAccent.copy(alpha = 0.35f), Color.Transparent)))
+                                    drawPath(path, EcoAccent, style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round))
                                 } else {
-                                    historyPoints[idx].generationValue ?: 0.0
+                                    // ── Rounded gradient bar chart ──
+                                    val barW = (stepX * 0.45f).coerceIn(8.dp.toPx(), 32.dp.toPx())
+                                    historyPoints.forEachIndexed { idx, pt ->
+                                        val valY    = pt.generationValue ?: 0.0
+                                        val ptX     = padLeft + idx * stepX - barW / 2f
+                                        val ptY     = h - padBottom - (valY / maxVal).toFloat() * graphH
+                                        val barH    = (valY / maxVal).toFloat() * graphH
+                                        drawRoundRect(
+                                            brush = Brush.verticalGradient(listOf(InfoAccentLight, InfoAccent)),
+                                            topLeft = Offset(ptX, ptY),
+                                            size = Size(barW, barH.coerceAtLeast(2f)),
+                                            cornerRadius = CornerRadius(6.dp.toPx(), 6.dp.toPx())
+                                        )
+                                    }
                                 }
-                                val dotY = height - padding - (valY / maxVal).toFloat() * graphHeight
-                                drawCircle(
-                                    color = PrimarySolar,
-                                    radius = 6.dp.toPx(),
-                                    center = Offset(ptX, dotY)
-                                )
-                                drawCircle(
-                                    color = Color.White,
-                                    radius = 3.dp.toPx(),
-                                    center = Offset(ptX, dotY)
-                                )
+
+                                // ── Draw X-Axis Labels ──
+                                val labelPaint = Paint().apply {
+                                    color = android.graphics.Color.parseColor("#64748B") // TextTertiary
+                                    textSize = 8.5.dp.toPx()
+                                    textAlign = Paint.Align.CENTER
+                                    isAntiAlias = true
+                                }
+                                val step = (historyPoints.size / 5).coerceAtLeast(1)
+                                historyPoints.forEachIndexed { idx, pt ->
+                                    val ptX = padLeft + idx * stepX
+                                    if (idx % step == 0 || idx == historyPoints.size - 1) {
+                                        drawContext.canvas.nativeCanvas.drawText(
+                                            pt.label,
+                                            ptX,
+                                            h - padBottom + 18.dp.toPx(),
+                                            labelPaint
+                                        )
+                                    }
+                                }
+
+                                // ── Interactive tooltip cursor ──
+                                activeIndex?.let { idx ->
+                                    val ptX  = padLeft + idx * stepX
+                                    val yVal = (if (selectedPeriod == "realtime") historyPoints[idx].powerValue else historyPoints[idx].generationValue) ?: 0.0
+                                    val ptY  = h - padBottom - (yVal / maxVal).toFloat() * graphH
+                                    drawLine(Color.White.copy(alpha = 0.5f), Offset(ptX, padTop), Offset(ptX, h - padBottom), strokeWidth = 1.dp.toPx())
+                                    drawCircle(PrimarySolar, radius = 6.dp.toPx(), center = Offset(ptX, ptY))
+                                    drawCircle(Color.White, radius = 3.dp.toPx(), center = Offset(ptX, ptY))
+                                }
                             }
                         }
                     }
                 }
+
+                Spacer(Modifier.height(24.dp))
+
+                // ── Stats grid ──
+                Text("Analytics summary", style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold, color = Color.White, modifier = Modifier.padding(bottom = 12.dp))
+
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    listOf(
+                        Triple(Icons.Default.Speed,      PrimarySolar, "Today's Output" to "${summary?.dailyGeneration ?: 0.0} kWh"),
+                        Triple(Icons.Default.Leaderboard, InfoAccent,  "Peak Output"    to "${summary?.peakPower ?: 0.0} kW"),
+                        Triple(Icons.Default.Sync,        EcoAccent,   "Sync Status"    to if (summary?.isSimulated == true) "Simulated" else "Live Cloud")
+                    ).forEach { (icon, tint, label) ->
+                        Box(
+                            modifier = Modifier.weight(1f)
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(GlassWhite)
+                                .border(1.dp, GlassBorder, RoundedCornerShape(16.dp))
+                                .padding(16.dp)
+                        ) {
+                            Column {
+                                Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
+                                Spacer(Modifier.height(8.dp))
+                                Text(label.first,  color = TextSecondary, fontSize = 11.sp)
+                                Text(label.second, fontWeight = FontWeight.Bold, color = Color.White, fontSize = 15.sp)
+                            }
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(30.dp))
             }
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            // Telemetry Summary Grid
-            Text(
-                "Telemetry Summary",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = Color.White,
-                modifier = Modifier.padding(bottom = 12.dp)
-            )
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                // Daily Yield
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(GlassWhite)
-                        .border(1.dp, GlassBorder, RoundedCornerShape(16.dp))
-                        .padding(16.dp)
-                ) {
-                    Column {
-                        Icon(Icons.Default.Speed, contentDescription = null, tint = PrimarySolar, modifier = Modifier.size(20.dp))
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text("Today's Yield", color = TextSecondary, fontSize = 11.sp)
-                        Text(
-                            text = "${summary?.dailyGeneration ?: 0.0} kWh",
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White,
-                            fontSize = 15.sp
-                        )
-                    }
-                }
-
-                // Peak Power
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(GlassWhite)
-                        .border(1.dp, GlassBorder, RoundedCornerShape(16.dp))
-                        .padding(16.dp)
-                ) {
-                    Column {
-                        Icon(Icons.Default.Leaderboard, contentDescription = null, tint = InfoAccent, modifier = Modifier.size(20.dp))
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text("Peak Output", color = TextSecondary, fontSize = 11.sp)
-                        Text(
-                            text = "${summary?.peakPower ?: 0.0} kW",
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White,
-                            fontSize = 15.sp
-                        )
-                    }
-                }
-
-                // Sync Status
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(GlassWhite)
-                        .border(1.dp, GlassBorder, RoundedCornerShape(16.dp))
-                        .padding(16.dp)
-                ) {
-                    Column {
-                        Icon(Icons.Default.Sync, contentDescription = null, tint = EcoAccent, modifier = Modifier.size(20.dp))
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text("Sync Monitor", color = TextSecondary, fontSize = 11.sp)
-                        val isSimulated = summary?.isSimulated ?: false
-                        Text(
-                            text = if (isSimulated) "Simulated" else "Live Cloud",
-                            fontWeight = FontWeight.Bold,
-                            color = if (isSimulated) WarningAccent else EcoAccent,
-                            fontSize = 15.sp
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(100.dp))
         }
     }
 }

@@ -64,16 +64,40 @@ class LoginViewModel @Inject constructor(
                     _loginState.value = LoginState.Error(errorMsg)
                 }
             } catch (e: java.net.SocketTimeoutException) {
-                _loginState.value = LoginState.Error("Connection timed out. Check your network.")
+                if (checkOfflineCredentials(identifier, password)) {
+                    _loginState.value = LoginState.Success
+                } else {
+                    _loginState.value = LoginState.Error("Connection timed out. Check your network.")
+                }
             } catch (e: java.net.UnknownHostException) {
-                _loginState.value = LoginState.Error("No internet connection. Please check your WiFi or data.")
+                if (checkOfflineCredentials(identifier, password)) {
+                    _loginState.value = LoginState.Success
+                } else {
+                    _loginState.value = LoginState.Error("No internet connection. Please check your WiFi or data.")
+                }
             } catch (e: java.net.ConnectException) {
-                _loginState.value = LoginState.Error("Cannot reach server. Please try again later.")
+                if (checkOfflineCredentials(identifier, password)) {
+                    _loginState.value = LoginState.Success
+                } else {
+                    _loginState.value = LoginState.Error("Cannot reach server. Please try again later.")
+                }
             } catch (e: Exception) {
-                Log.e(TAG, "Login failed", e)
-                _loginState.value = LoginState.Error("Connection failed. Please try again.")
+                if (checkOfflineCredentials(identifier, password)) {
+                    _loginState.value = LoginState.Success
+                } else {
+                    Log.e(TAG, "Login failed", e)
+                    _loginState.value = LoginState.Error("Connection failed. Please try again.")
+                }
             }
         }
+    }
+
+    private fun checkOfflineCredentials(identifier: String, password: String): Boolean {
+        val savedId = sessionManager.getSavedLoginId()
+        val savedPass = sessionManager.getSavedPass()
+        return savedId != null && savedPass != null &&
+                savedId.trim().lowercase() == identifier.trim().lowercase() &&
+                savedPass.trim() == password.trim()
     }
     
     fun resetState() {

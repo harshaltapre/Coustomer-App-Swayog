@@ -30,9 +30,9 @@ object AppModule {
             level = HttpLoggingInterceptor.Level.BODY
         }
         return OkHttpClient.Builder()
-            .connectTimeout(30, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
-            .writeTimeout(30, TimeUnit.SECONDS)
+            .connectTimeout(8, TimeUnit.SECONDS)
+            .readTimeout(15, TimeUnit.SECONDS)
+            .writeTimeout(15, TimeUnit.SECONDS)
             .addInterceptor(logging)
             .addInterceptor(authInterceptor)
             .build()
@@ -41,10 +41,18 @@ object AppModule {
     @Provides
     @Singleton
     fun provideApiService(okHttpClient: OkHttpClient): ApiService {
+        val isEmulator = android.os.Build.MODEL.contains("google_sdk") ||
+                android.os.Build.MODEL.contains("Emulator") ||
+                android.os.Build.FINGERPRINT.startsWith("generic") ||
+                android.os.Build.HARDWARE.contains("goldfish") ||
+                android.os.Build.HARDWARE.contains("ranchu") ||
+                android.os.Build.PRODUCT.contains("sdk_gphone") ||
+                android.os.Build.PRODUCT.contains("sdk_google")
+        
+        val url = if (isEmulator) "http://10.0.2.2:4000/" else "http://192.168.1.12:4000/"
+        
         return Retrofit.Builder()
-            // Set to staging URL or local computer IP
-            // Emulator: http://10.0.2.2:4000, Local: http://127.0.0.1:4000, Physical: http://192.168.1.12:4000/
-            .baseUrl("http://192.168.1.12:4000/")
+            .baseUrl(url)
             .addConverterFactory(GsonConverterFactory.create())
             .client(okHttpClient)
             .build()
@@ -89,4 +97,7 @@ object AppModule {
 
     @Provides
     fun provideAmcVisitDao(db: AppDatabase): AmcVisitDao = db.amcVisitDao()
+
+    @Provides
+    fun provideInverterDao(db: AppDatabase): InverterDao = db.inverterDao()
 }

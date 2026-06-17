@@ -17,7 +17,7 @@ import com.example.coustomerapp.data.local.entities.*
         SavedCardEntity::class,
         AmcVisit::class
     ],
-    version = 3, // Upgraded version to support schema changes
+    version = 4, // Upgraded version to support schema changes and trigger fallback migration
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -30,4 +30,5 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun invoiceDao(): InvoiceDao
     abstract fun savedCardDao(): SavedCardDao
     abstract fun amcVisitDao(): AmcVisitDao
+    abstract fun inverterDao(): InverterDao
 }

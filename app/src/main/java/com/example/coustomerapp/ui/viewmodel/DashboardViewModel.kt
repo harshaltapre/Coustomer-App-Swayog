@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.coustomerapp.data.local.entities.CustomerProfileEntity
 import com.example.coustomerapp.data.local.entities.DispatchRecordEntity
 import com.example.coustomerapp.data.local.entities.InverterGenerationSummaryEntity
+import com.example.coustomerapp.data.remote.dto.CurrentWeather
 import com.example.coustomerapp.data.repository.CustomerRepository
 import com.google.firebase.FirebaseApp
 import com.google.firebase.messaging.FirebaseMessaging
@@ -56,17 +57,8 @@ class DashboardViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     // Weather state
-    private val _weatherTemp = MutableStateFlow("--")
-    val weatherTemp: StateFlow<String> = _weatherTemp.asStateFlow()
-
-    private val _weatherWind = MutableStateFlow("--")
-    val weatherWind: StateFlow<String> = _weatherWind.asStateFlow()
-
-    private val _weatherCondition = MutableStateFlow("Loading...")
-    val weatherCondition: StateFlow<String> = _weatherCondition.asStateFlow()
-
-    private val _weatherIcon = MutableStateFlow("☀️")
-    val weatherIcon: StateFlow<String> = _weatherIcon.asStateFlow()
+    private val _weatherState = MutableStateFlow<CurrentWeather?>(null)
+    val weatherState: StateFlow<CurrentWeather?> = _weatherState.asStateFlow()
 
     private val _isRefreshing = MutableStateFlow(false)
     val isRefreshing: StateFlow<Boolean> = _isRefreshing
@@ -100,48 +92,18 @@ class DashboardViewModel @Inject constructor(
 
     private fun observeProfileForWeather() {
         viewModelScope.launch(errorHandler) {
-            customerProfile.filterNotNull().first().let { profile ->
-                fetchWeather(profile.city.ifBlank { "Delhi" })
+            customerProfile.filterNotNull().collect { profile ->
+                if (profile.city.isNotBlank()) {
+                    loadWeather(profile.city)
+                }
             }
         }
     }
 
-    private suspend fun fetchWeather(city: String) {
-        withContext(Dispatchers.IO) {
-            try {
-                val encodedCity = java.net.URLEncoder.encode(city, "UTF-8")
-                val url = "https://wttr.in/$encodedCity?format=j1"
-                val json = URL(url).readText()
-                val root = JSONObject(json)
-                val current = root.getJSONArray("current_condition").getJSONObject(0)
-
-                val tempC = current.getString("temp_C")
-                val windKmph = current.getString("windspeedKmph")
-                val weatherDesc = current.getJSONArray("weatherDesc").getJSONObject(0).getString("value")
-                val weatherCode = current.optString("weatherCode", "113")
-
-                _weatherTemp.value = "${tempC}°C"
-                _weatherWind.value = "$windKmph km/h"
-                _weatherCondition.value = weatherDesc
-
-                // Map weather code to emoji
-                _weatherIcon.value = when {
-                    weatherCode == "113" -> "☀️"
-                    weatherCode == "116" -> "⛅"
-                    weatherCode in listOf("119", "122") -> "☁️"
-                    weatherCode in listOf("176", "263", "266", "293", "296", "299", "302", "305", "308") -> "🌧️"
-                    weatherCode in listOf("200", "386", "389", "392", "395") -> "⛈️"
-                    weatherCode in listOf("227", "230") -> "❄️"
-                    weatherCode in listOf("143", "248", "260") -> "🌫️"
-                    else -> "🌤️"
-                }
-
-                Log.d(TAG, "Weather fetched: $tempC°C, $windKmph km/h, $weatherDesc")
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to fetch weather", e)
-                _weatherCondition.value = "Unavailable"
-                _weatherIcon.value = "🌤️"
-            }
+    fun loadWeather(city: String) {
+        viewModelScope.launch(errorHandler) {
+            val weather = repository.fetchWeatherForCity(city)
+            _weatherState.value = weather
         }
     }
 
@@ -174,7 +136,7 @@ class DashboardViewModel @Inject constructor(
 
                 repository.getCustomerProfileDirect()?.let { profile ->
                     repository.refreshInverterTelemetry(profile.id)
-                    fetchWeather(profile.city.ifBlank { "Delhi" })
+                    loadWeather(profile.city.ifBlank { "Delhi" })
                 }
             } finally {
                 _isRefreshing.value = false

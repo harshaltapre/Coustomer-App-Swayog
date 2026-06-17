@@ -37,6 +37,8 @@ import com.example.coustomerapp.data.local.entities.InverterGenerationHistoryEnt
 import com.example.coustomerapp.ui.screens.dashboard.GlassCard
 import com.example.coustomerapp.ui.theme.*
 import com.example.coustomerapp.ui.viewmodel.AnalyticsViewModel
+import androidx.compose.ui.graphics.nativeCanvas
+import android.graphics.Paint
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -94,7 +96,7 @@ fun AnalyticsScreen(
             // Period Selection Tabs
             val periods = listOf(
                 "realtime" to "Real-time",
-                "daily" to "Daily",
+                "weekly" to "Weekly",
                 "monthly" to "Monthly",
                 "yearly" to "Yearly"
             )
@@ -207,11 +209,14 @@ fun AnalyticsScreen(
                                     )
                                 }
                         ) {
-                            val width = size.width
-                            val height = size.height
-                            val padding = 36.dp.toPx()
-                            val graphWidth = width - padding * 2
-                            val graphHeight = height - padding * 2
+                            val width       = size.width
+                            val height      = size.height
+                            val padLeft     = 42.dp.toPx()
+                            val padRight    = 16.dp.toPx()
+                            val padTop      = 20.dp.toPx()
+                            val padBottom   = 36.dp.toPx()
+                            val graphWidth  = width - padLeft - padRight
+                            val graphHeight = height - padTop - padBottom
 
                             // Max value for scaling
                             val maxVal = historyPoints.maxOfOrNull {
@@ -223,18 +228,40 @@ fun AnalyticsScreen(
 
                             // Find active touch index
                             touchX?.let { tx ->
-                                val relativeX = tx - padding
+                                val relativeX = tx - padLeft
                                 val index = (relativeX / stepX).roundToInt().coerceIn(0, historyPoints.size - 1)
                                 activeIndex = index
                             }
 
-                            // Draw X & Y axis lines
-                            drawLine(
-                                color = GlassBorder,
-                                start = Offset(padding, height - padding),
-                                end = Offset(width - padding, height - padding),
-                                strokeWidth = 2f
-                            )
+                            // ── Draw Horizontal Grid Lines and Y-Axis Labels ──
+                            val gridLines = 4
+                            val textPaint = Paint().apply {
+                                color = android.graphics.Color.parseColor("#94A3B8") // TextSecondary
+                                textSize = 9.dp.toPx()
+                                textAlign = Paint.Align.RIGHT
+                                isAntiAlias = true
+                            }
+                            for (i in 0..gridLines) {
+                                val fraction = i.toFloat() / gridLines
+                                val y = height - padBottom - fraction * graphHeight
+                                // Grid line
+                                drawLine(
+                                    color = if (i == 0) GlassBorder else Color.White.copy(alpha = 0.04f),
+                                    start = Offset(padLeft, y),
+                                    end = Offset(width - padRight, y),
+                                    strokeWidth = if (i == 0) 2f else 1f
+                                )
+                                // Y value label
+                                val unit = if (selectedPeriod == "realtime") "kW" else "kWh"
+                                val yVal = fraction * maxVal
+                                val label = String.format("%.1f", yVal)
+                                drawContext.canvas.nativeCanvas.drawText(
+                                    "$label $unit",
+                                    padLeft - 8.dp.toPx(),
+                                    y + 3.dp.toPx(),
+                                    textPaint
+                                )
+                            }
 
                             // 1. Draw Real-time spline area chart
                             if (selectedPeriod == "realtime") {
@@ -243,16 +270,16 @@ fun AnalyticsScreen(
 
                                 historyPoints.forEachIndexed { idx, pt ->
                                     val valY = pt.powerValue ?: 0.0
-                                    val ptX = padding + idx * stepX
-                                    val ptY = height - padding - (valY / maxVal).toFloat() * graphHeight
+                                    val ptX = padLeft + idx * stepX
+                                    val ptY = height - padBottom - (valY / maxVal).toFloat() * graphHeight
 
                                     if (idx == 0) {
                                         path.moveTo(ptX, ptY)
-                                        fillPath.moveTo(ptX, height - padding)
+                                        fillPath.moveTo(ptX, height - padBottom)
                                         fillPath.lineTo(ptX, ptY)
                                     } else {
-                                        val prevPtX = padding + (idx - 1) * stepX
-                                        val prevPtY = height - padding - ((historyPoints[idx - 1].powerValue ?: 0.0) / maxVal).toFloat() * graphHeight
+                                        val prevPtX = padLeft + (idx - 1) * stepX
+                                        val prevPtY = height - padBottom - ((historyPoints[idx - 1].powerValue ?: 0.0) / maxVal).toFloat() * graphHeight
                                         
                                         // Cubic Bezier calculation
                                         val ctrlX1 = (prevPtX + ptX) / 2f
@@ -265,7 +292,7 @@ fun AnalyticsScreen(
                                     }
 
                                     if (idx == historyPoints.size - 1) {
-                                        fillPath.lineTo(ptX, height - padding)
+                                        fillPath.lineTo(ptX, height - padBottom)
                                         fillPath.close()
                                     }
                                 }
@@ -286,15 +313,15 @@ fun AnalyticsScreen(
                                 )
                             } else {
                                 // 2. Draw Historical rounded bar charts
-                                val barWidth = (stepX * 0.5f).coerceIn(8.dp.toPx(), 40.dp.toPx())
+                                val barWidth = (stepX * 0.45f).coerceIn(8.dp.toPx(), 32.dp.toPx())
                                 historyPoints.forEachIndexed { idx, pt ->
                                     val valY = pt.generationValue ?: 0.0
-                                    val ptX = padding + idx * stepX - barWidth / 2f
-                                    val ptY = height - padding - (valY / maxVal).toFloat() * graphHeight
+                                    val ptX = padLeft + idx * stepX - barWidth / 2f
+                                    val ptY = height - padBottom - (valY / maxVal).toFloat() * graphHeight
                                     val barHeight = (valY / maxVal).toFloat() * graphHeight
 
                                     drawRoundRect(
-                                        color = InfoAccent,
+                                        brush = Brush.verticalGradient(listOf(InfoAccentLight, InfoAccent)),
                                         topLeft = Offset(ptX, ptY),
                                         size = Size(barWidth, barHeight.coerceAtLeast(2f)),
                                         cornerRadius = CornerRadius(6.dp.toPx(), 6.dp.toPx())
@@ -302,33 +329,47 @@ fun AnalyticsScreen(
                                 }
                             }
 
-                            // Draw X Labels
+                            // ── Draw X-Axis Labels ──
+                            val labelPaint = Paint().apply {
+                                color = android.graphics.Color.parseColor("#64748B") // TextTertiary
+                                textSize = 8.5.dp.toPx()
+                                textAlign = Paint.Align.CENTER
+                                isAntiAlias = true
+                            }
+                            val step = (historyPoints.size / 5).coerceAtLeast(1)
                             historyPoints.forEachIndexed { idx, pt ->
-                                val ptX = padding + idx * stepX
-                                if (idx % (historyPoints.size / 5).coerceAtLeast(1) == 0 || idx == historyPoints.size - 1) {
-                                    // Simple dot for labels
-                                    drawCircle(
-                                        color = GlassBorder,
-                                        radius = 3f,
-                                        center = Offset(ptX, height - padding)
+                                val ptX = padLeft + idx * stepX
+                                if (idx % step == 0 || idx == historyPoints.size - 1) {
+                                    drawContext.canvas.nativeCanvas.drawText(
+                                        pt.label,
+                                        ptX,
+                                        height - padBottom + 18.dp.toPx(),
+                                        labelPaint
                                     )
                                 }
                             }
 
                             // Draw Tooltip line
                             activeIndex?.let { idx ->
-                                val ptX = padding + idx * stepX
+                                val ptX = padLeft + idx * stepX
+                                val yVal = (if (selectedPeriod == "realtime") historyPoints[idx].powerValue else historyPoints[idx].generationValue) ?: 0.0
+                                val ptY = height - padBottom - (yVal / maxVal).toFloat() * graphHeight
                                 drawLine(
-                                    color = Color.White.copy(alpha = 0.6f),
-                                    start = Offset(ptX, padding),
-                                    end = Offset(ptX, height - padding),
+                                    color = Color.White.copy(alpha = 0.5f),
+                                    start = Offset(ptX, padTop),
+                                    end = Offset(ptX, height - padBottom),
                                     strokeWidth = 1.dp.toPx(),
                                     cap = StrokeCap.Round
                                 )
                                 drawCircle(
                                     color = PrimarySolar,
                                     radius = 6.dp.toPx(),
-                                    center = Offset(ptX, height - padding - (((if (selectedPeriod == "realtime") historyPoints[idx].powerValue else historyPoints[idx].generationValue) ?: 0.0) / maxVal).toFloat() * graphHeight)
+                                    center = Offset(ptX, ptY)
+                                )
+                                drawCircle(
+                                    color = Color.White,
+                                    radius = 3.dp.toPx(),
+                                    center = Offset(ptX, ptY)
                                 )
                             }
                         }
